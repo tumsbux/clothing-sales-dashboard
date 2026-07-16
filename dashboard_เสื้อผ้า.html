@@ -215,16 +215,16 @@ function renderTrend() {
     data: {
       labels,
       datasets: [
-        {label:'ปี 2568 (2025)', data:m2025, borderColor:'#94a3b8', backgroundColor:'transparent', tension:0.3},
-        {label:'ปี 2569 (2026)', data:m2026, borderColor:'#22d3ee', backgroundColor:'rgba(34,211,238,0.1)', tension:0.3, fill:true},
+        {label:'ปี 2568 (2025)', data:m2025, borderColor:'#a78b93', backgroundColor:'transparent', tension:0.3},
+        {label:'ปี 2569 (2026)', data:m2026, borderColor:'#e08bab', backgroundColor:'rgba(224,139,171,0.15)', tension:0.3, fill:true},
       ]
     },
     options: {
       responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#e2e8f0'}}},
+      plugins:{legend:{labels:{color:'#52404a'}}},
       scales:{
-        x:{ticks:{color:'#94a3b8'}, grid:{color:'#334155'}},
-        y:{ticks:{color:'#94a3b8', callback:(v)=>fmtNum(v)}, grid:{color:'#334155'}}
+        x:{ticks:{color:'#a78b93'}, grid:{color:'#f3dde6'}},
+        y:{ticks:{color:'#a78b93', callback:(v)=>fmtNum(v)}, grid:{color:'#f3dde6'}}
       }
     }
   });
