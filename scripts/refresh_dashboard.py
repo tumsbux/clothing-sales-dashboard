@@ -60,7 +60,7 @@ branch_bills = {}      # code  -> {ym: bills}
 monthly_totals = {}    # ym -> {qty, sales, bills}
 
 with conn.cursor() as cur:
-    cur.execute(f"SELECT iprod, idesc FROM dim_product WHERE {PRODUCT_FILTER_SQL}")
+    cur.execute(f"SELECT iprod, idesc FROM dim_product p WHERE {PRODUCT_FILTER_SQL}")
     for r in cur.fetchall():
         prod_desc[r['iprod']] = r['idesc']
 
