@@ -193,7 +193,7 @@
 <div class="section">
   <h2>แนวโน้มยอดขายรายเดือน (เทียบปีก่อน)</h2>
   <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
-  <div class="note">หมายเหตุ: ยอดเดือน ก.ค. 2569 เป็นข้อมูลถึงวันที่ 15 ก.ค. เท่านั้น (ครึ่งเดือน) ไม่ควรเทียบตรงกับเดือนเต็ม</div>
+  <div class="note" id="cutoffNote"></div>
 </div>
 
 <div class="section" id="prodSection">
@@ -290,15 +290,26 @@ function exportPDF(sectionId) {
 // ---------- KPI ----------
 function renderKPI() {
   const monthly = DATA.monthly;
-  const jul26 = monthly.find(m => m.ym === '2026-07');
-  const jul25 = monthly.find(m => m.ym === '2025-07');
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 24*60*60*1000); // current date - 1 (fixed 2026-07-18: fact_sales loads through yesterday, KPIs must use "current-1", not a hardcoded day)
+  const thMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  const cutoffDD = cutoff.getDate();
+  const cutoffMonthTh = thMonths[cutoff.getMonth()];
+  const cutoffBEyear = cutoff.getFullYear() + 543;
+  const cutoffBEyear2 = String(cutoffBEyear).slice(-2);
+  const cutoffStr = String(cutoffDD).padStart(2,'0') + '-' + String(cutoff.getMonth()+1).padStart(2,'0') + '-' + cutoff.getFullYear();
+  const curYm = cutoff.getFullYear() + '-' + String(cutoff.getMonth()+1).padStart(2,'0');
+  const prevYm = (cutoff.getFullYear()-1) + '-' + String(cutoff.getMonth()+1).padStart(2,'0');
+  const prevBEyear2 = String((cutoff.getFullYear()-1) + 543).slice(-2);
+  const jul26 = monthly.find(m => m.ym === curYm);
+  const jul25 = monthly.find(m => m.ym === prevYm);
   const ytdSales = monthly.reduce((a,m)=>a+m.sales,0);
   const ytdQty = monthly.reduce((a,m)=>a+m.qty,0);
   const growth = jul25 && jul25.sales>0 ? ((jul26.sales - jul25.sales)/jul25.sales*100) : null;
   const kpis = [
-    {label:'📅 ยอดขาย ก.ค. 2569 (ถึง 15 ก.ค.)', value: '฿'+fmtBaht(jul26.sales), sub: 'จำนวน '+fmtNum(jul26.qty)+' ชิ้น'},
-    {label:'📈 ยอดขายสะสม ม.ค.68–ก.ค.69', value: '฿'+fmtBaht(ytdSales), sub: 'จำนวน '+fmtNum(ytdQty)+' ชิ้น'},
-    {label:'🚀 % Growth YoY (ก.ค. เทียบ ก.ค.)', value: growth!==null ? (growth>=0?'+':'')+fmtNum(growth,1)+'%' : '-', sub:'ก.ค.68 = ฿'+fmtBaht(jul25?jul25.sales:0), cls: growth>=0?'growth-pos':'growth-neg'},
+    {label:`📅 ยอดขาย ${cutoffMonthTh} ${cutoffBEyear} (ถึง ${cutoffDD} ${cutoffMonthTh})`, value: '฿'+fmtBaht(jul26?jul26.sales:0), sub: 'จำนวน '+fmtNum(jul26?jul26.qty:0)+' ชิ้น'},
+    {label:`📈 ยอดขายสะสม ม.ค.68–${cutoffMonthTh}${cutoffBEyear2}`, value: '฿'+fmtBaht(ytdSales), sub: 'จำนวน '+fmtNum(ytdQty)+' ชิ้น'},
+    {label:`🚀 % Growth YoY (${cutoffMonthTh} เทียบ ${cutoffMonthTh})`, value: growth!==null ? (growth>=0?'+':'')+fmtNum(growth,1)+'%' : '-', sub:`${cutoffMonthTh}${prevBEyear2} = ฿`+fmtBaht(jul25?jul25.sales:0), cls: growth>=0?'growth-pos':'growth-neg'},
     {label:'📦 จำนวน SKU ในกลุ่มเสื้อผ้า', value: fmtNum(DATA.products.length), sub:'สินค้า (parcode)'},
     {label:'🏬 จำนวนสาขาที่ขายเสื้อผ้า', value: fmtNum(DATA.branches.length), sub:'สาขา'},
   ];
@@ -309,7 +320,8 @@ function renderKPI() {
       <div class="value ${k.cls||''}">${k.value}</div>
       <div class="sub">${k.sub}</div>
     </div>`).join('');
-  document.getElementById('subtitle').textContent = 'ข้อมูลจริงจาก fact_sales x dim_product (กลุ่ม 08015 เสื้อผ้า) x dim_branch | อัปเดตข้อมูลถึง 15-07-2026';
+  document.getElementById('subtitle').textContent = 'ข้อมูลจริงจาก fact_sales x dim_product (กลุ่ม 08015 เสื้อผ้า) x dim_branch | อัปเดตข้อมูลถึง ' + cutoffStr;
+  document.querySelectorAll('#cutoffNote').forEach(el => { el.textContent = `หมายเหตุ: ยอดเดือน ${cutoffMonthTh} ${cutoffBEyear} เป็นข้อมูลถึงวันที่ ${cutoffDD} ${cutoffMonthTh} เท่านั้น ไม่ควรเทียบตรงกับเดือนเต็ม`; });
 }
 
 // ---------- Trend chart ----------
