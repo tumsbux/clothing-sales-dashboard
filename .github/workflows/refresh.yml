@@ -1,0 +1,40 @@
+name: Refresh dashboard data
+
+on:
+  schedule:
+    # 09:10 Asia/Bangkok (UTC+7) daily
+    - cron: '10 2 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install pymysql
+
+      - name: Refresh data from MySQL and splice into HTML
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: python scripts/refresh_dashboard.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html "dashboard_เสื้อผ้า.html"
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Auto-refresh dashboard data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
