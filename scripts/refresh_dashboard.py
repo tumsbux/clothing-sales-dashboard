@@ -14,6 +14,14 @@ avoids long-running connections that can get dropped by MySQL.
 
 Required environment variables (set as GitHub Actions repo secrets):
   DB_HOST, DB_PORT (default 3306), DB_USER, DB_PASSWORD, DB_NAME (default "data-lake")
+
+--- 2026-07-30 patch ---
+Added `as_of` (actual MAX(sodate) for the latest live-queried month) to the exported
+JSON, and one-time str.replace() patches applied to the HTML template so the subtitle,
+KPI card labels, and the "partial month" note under the trend chart compute their
+month/day text from the live data instead of being hand-typed constants that go stale.
+These replace()s are no-ops once the template already contains the dynamic version, so
+this is safe to run indefinitely.
 """
 import os, re, json, datetime, time
 import pymysql
@@ -116,6 +124,7 @@ prod_monthly = {}      # iprod -> {ym: {qty, sales}}   (freshly queried months o
 branch_monthly = {}    # code  -> {ym: {qty, sales}}
 branch_bills = {}      # code  -> {ym: bills}
 monthly_totals = {}    # ym -> {qty, sales, bills}
+as_of_date = None       # actual MAX(sodate) found within latest_ym, set below
 
 cur = run(f"SELECT iprod, idesc FROM dim_product p WHERE {PRODUCT_FILTER_SQL}")
 for r in cur.fetchall():
@@ -175,6 +184,19 @@ for ym in to_query:
     )
     m_bills = cur.fetchone()['bills']
     monthly_totals[ym] = {'qty': round(m_qty, 2), 'sales': round(m_sales, 2), 'bills': m_bills}
+
+    if ym == latest_ym:
+        # actual last date with sales data inside the latest (usually still-open) month —
+        # this is what the dashboard should say it's "up to date", not a hand-typed date.
+        cur = run(
+            f"SELECT MAX(f.sodate) AS max_date FROM fact_sales f "
+            f"INNER JOIN dim_product p ON p.iprod=f.iprod AND {PRODUCT_FILTER_SQL} "
+            f"WHERE f.sodate >= %s AND f.sodate < %s",
+            (start, end),
+        )
+        row = cur.fetchone()
+        if row and row.get('max_date'):
+            as_of_date = row['max_date'].strftime('%Y-%m-%d')
 
 conn.close()
 
@@ -275,12 +297,49 @@ data = {
     'branches': branches,
     'dm': list(dm_roll.values()),
     'rm': list(rm_roll.values()),
+    'as_of': as_of_date,
 }
 
 compact = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
 pattern = re.compile(r'(<script id="dashboard-data" type="application/json">)(.*?)(</script>)', re.S)
 tpl = open('index.html', encoding='utf-8').read()
+
+# ---- one-time patches: make the hand-typed "current month" bits compute themselves ----
+PATCHES = [
+    (
+        "function renderKPI() {\n  const monthly = DATA.monthly;\n  const jul26 = monthly.find(m => m.ym === '2026-07');\n  const jul25 = monthly.find(m => m.ym === '2025-07');",
+        "function renderKPI() {\n  const monthly = DATA.monthly;\n  const THM = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];\n  const thFull = ym => ym ? THM[+ym.slice(5,7)-1] + ' ' + (+ym.slice(0,4)+543) : '';\n  const thShort = ym => ym ? THM[+ym.slice(5,7)-1] + String(+ym.slice(0,4)+543).slice(-2) : '';\n  const latestYm = monthly.length ? monthly[monthly.length-1].ym : null;\n  const prevYm = latestYm ? (parseInt(latestYm.slice(0,4))-1) + latestYm.slice(4) : null;\n  const jul26 = monthly.find(m => m.ym === latestYm);\n  const jul25 = monthly.find(m => m.ym === prevYm);",
+    ),
+    (
+        "{label:'📅 ยอดขาย ก.ค. 2569 (ถึง 15 ก.ค.)', value: '฿'+fmtBaht(jul26.sales), sub: 'จำนวน '+fmtNum(jul26.qty)+' ชิ้น'},",
+        "{label:'📅 ยอดขาย ' + thFull(latestYm) + (DATA.as_of ? ' (ถึง ' + parseInt(DATA.as_of.slice(8,10)) + ' ' + THM[+DATA.as_of.slice(5,7)-1] + ')' : ''), value: '฿'+fmtBaht(jul26.sales), sub: 'จำนวน '+fmtNum(jul26.qty)+' ชิ้น'},",
+    ),
+    (
+        "{label:'📈 ยอดขายสะสม ม.ค.68–ก.ค.69', value: '฿'+fmtBaht(ytdSales), sub: 'จำนวน '+fmtNum(ytdQty)+' ชิ้น'},",
+        "{label:'📈 ยอดขายสะสม ' + thShort(monthly[0] && monthly[0].ym) + '–' + thShort(latestYm), value: '฿'+fmtBaht(ytdSales), sub: 'จำนวน '+fmtNum(ytdQty)+' ชิ้น'},",
+    ),
+    (
+        "{label:'🚀 % Growth YoY (ก.ค. เทียบ ก.ค.)', value: growth!==null ? (growth>=0?'+':'')+fmtNum(growth,1)+'%' : '-', sub:'ก.ค.68 = ฿'+fmtBaht(jul25?jul25.sales:0), cls: growth>=0?'growth-pos':'growth-neg'},",
+        "{label:'🚀 % Growth YoY (' + thFull(latestYm).split(' ')[0] + ' เทียบปีก่อน)', value: growth!==null ? (growth>=0?'+':'')+fmtNum(growth,1)+'%' : '-', sub: thShort(prevYm)+' = ฿'+fmtBaht(jul25?jul25.sales:0), cls: growth>=0?'growth-pos':'growth-neg'},",
+    ),
+    (
+        '<div class="note">หมายเหตุ: ยอดเดือน ก.ค. 2569 เป็นข้อมูลถึงวันที่ 20 ก.ค. เท่านั้น (ครึ่งเดือน) ไม่ควรเทียบตรงกับเดือนเต็ม</div>',
+        '<div class="note" id="trendNote"></div>',
+    ),
+    (
+        "document.getElementById('subtitle').textContent = 'ข้อมูลจริงจาก fact_sales x dim_product (กลุ่ม 08015 เสื้อผ้า) x dim_branch | อัปเดตข้อมูลถึง 20-07-2026';\n}",
+        "document.getElementById('subtitle').textContent = 'ข้อมูลจริงจาก fact_sales x dim_product (กลุ่ม 08015 เสื้อผ้า) x dim_branch | อัปเดตข้อมูลถึง ' + (DATA.as_of ? DATA.as_of.slice(8,10)+'-'+DATA.as_of.slice(5,7)+'-'+DATA.as_of.slice(0,4) : '-');\n  const noteEl = document.getElementById('trendNote');\n  if (noteEl && DATA.as_of && latestYm) {\n    const asOfDay = parseInt(DATA.as_of.slice(8,10));\n    const daysInMonth = new Date(+latestYm.slice(0,4), +latestYm.slice(5,7), 0).getDate();\n    noteEl.textContent = asOfDay < daysInMonth\n      ? 'หมายเหตุ: ยอดเดือน ' + thFull(latestYm) + ' เป็นข้อมูลถึงวันที่ ' + asOfDay + ' ' + THM[+latestYm.slice(5,7)-1] + ' เท่านั้น (ยังไม่ครบเดือน) ไม่ควรเทียบตรงกับเดือนเต็ม'\n      : '';\n  }\n}",
+    ),
+]
+
+patched_count = 0
+for old, new in PATCHES:
+    if old in tpl:
+        tpl = tpl.replace(old, new, 1)
+        patched_count += 1
+print(f"  applied {patched_count}/{len(PATCHES)} template patch(es) (0 is normal once already patched)")
+
 m = pattern.search(tpl)
 assert m, 'dashboard-data script tag not found in index.html'
 final = pattern.sub(lambda mo: mo.group(1) + compact + mo.group(3), tpl, count=1)
@@ -292,3 +351,4 @@ print(f"Refreshed {len(products)} products, {len(branches)} branches, "
       f"{len(months)} months ({months[0]}..{months[-1]}). Queried live: {to_query}")
 print(f"YTD sales check: products={sum(p['sales_ytd'] for p in products):.2f} "
       f"monthly_series={sum(x['sales'] for x in data['monthly']):.2f}")
+print(f"as_of (latest sodate found in {latest_ym}): {as_of_date}")
